@@ -14,38 +14,57 @@ const FLOW = [
   },
   {
     n: '02',
-    title: 'Cases',
-    body: 'Open people or accounts, see why the score moved, and pick an action.',
+    title: 'Cases & Counterfactuals',
+    body: 'Open accounts, see why the score moved, and explore feasible counterfactual scenarios.',
     to: '/cases',
     cta: 'Review cases',
   },
   {
     n: '03',
-    title: 'Follow-ups',
-    body: 'Commit an action, assign an owner, and check in when it comes due.',
-    to: '/follow-ups',
-    cta: 'Follow-ups',
+    title: 'Decision Studio',
+    body: 'Optimize action allocation under configurable budgets, capacity, and ROI constraints.',
+    to: '/decision-studio',
+    cta: 'Optimize decisions',
   },
   {
     n: '04',
-    title: 'What-if & learn',
-    body: 'Test levers before you spend. Outcomes reshape rankings over time.',
-    to: '/whatif',
-    cta: 'What-if',
+    title: 'Evaluation Lab',
+    body: 'Empirical benchmark against baselines, calibration curves, and conformal prediction coverage.',
+    to: '/evaluation-lab',
+    cta: 'Evaluation Lab',
+  },
+  {
+    n: '05',
+    title: 'Follow-ups & Feedback',
+    body: 'Commit actions, assign owners, and track observed outcomes vs predicted lift in the feedback loop.',
+    to: '/follow-ups',
+    cta: 'Follow-ups',
   },
 ]
 
 const CAPABILITIES = [
   {
-    title: 'Explainable scores',
-    body: 'Every prediction comes with drivers, business language, and trust signals — including when not to act.',
+    title: 'Actionable Counterfactuals',
+    body: 'Feasible recommendations that respect business rules and immutable attributes with explicit causal caveats.',
   },
   {
-    title: 'Ranked actions',
-    body: 'Recommendations weigh impact vs cost, then land on a durable follow-up you can assign and audit.',
+    title: 'Constraint-Aware Optimizer',
+    body: 'Mathematical ILP Knapsack & Greedy optimization maximizing net benefit under budgets and capacity.',
   },
   {
-    title: 'Portfolio intelligence',
+    title: 'Model Trust & Calibration Lab',
+    body: 'Real-world benchmark on IBM Telco data: ECE, Brier score, conformal coverage, and baseline comparisons.',
+  },
+  {
+    title: 'Drift & Safe Model Lifecycle',
+    body: 'PSI & KS drift detection, candidate models trained in isolation, gated promotion, and atomic rollback.',
+  },
+  {
+    title: 'End-to-End Decision Traceability',
+    body: 'Full lineage from prediction and explanation to action commitment, observed outcome, and empirical lift.',
+  },
+  {
+    title: 'Portfolio Intelligence',
     body: 'See ROI by action, capacity pressure, and overdue check-ins across the org — not just one case.',
   },
 ]

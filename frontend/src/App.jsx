@@ -13,6 +13,8 @@ import WhatIf from './pages/WhatIf'
 import WhatIfEntry from './pages/WhatIfEntry'
 import Cases from './pages/Cases'
 import Monitoring from './pages/Monitoring'
+import DecisionStudio from './pages/DecisionStudio'
+import EvaluationLab from './pages/EvaluationLab'
 import Home from './pages/Home'
 import Settings from './pages/Settings'
 
@@ -64,6 +66,8 @@ function AppRoutes() {
         <Route path="analytics" element={<Navigate to="/follow-ups" replace />} />
         <Route path="whatif" element={<WhatIfEntry />} />
         <Route path="whatif/:projectId" element={<WhatIf />} />
+        <Route path="decision-studio" element={<DecisionStudio />} />
+        <Route path="evaluation-lab" element={<EvaluationLab />} />
         <Route path="monitoring" element={<Monitoring />} />
         <Route path="datasets" element={<Datasets />} />
         <Route path="projects" element={<Projects />} />

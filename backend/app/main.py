@@ -25,6 +25,10 @@ from app.routes import (
     datasets,
     projects,
     actions,
+    optimizer,
+    evaluation,
+    monitoring,
+    feedback_analytics,
 )
 
 settings = get_settings()
@@ -97,6 +101,10 @@ app.include_router(auth.router, prefix=f"{settings.api_prefix}/auth", tags=["�
 app.include_router(datasets.router, prefix=f"{settings.api_prefix}/datasets", tags=["📊 Datasets"])
 app.include_router(projects.router, prefix=f"{settings.api_prefix}/projects", tags=["🎯 Projects"])
 app.include_router(actions.router, prefix=f"{settings.api_prefix}/actions", tags=["⚡ Actions"])
+app.include_router(optimizer.router, prefix=f"{settings.api_prefix}/optimizer", tags=["🎯 Decision Optimizer"])
+app.include_router(evaluation.router, prefix=f"{settings.api_prefix}/evaluation", tags=["🧪 Evaluation Lab"])
+app.include_router(monitoring.router, prefix=f"{settings.api_prefix}/monitoring", tags=["📈 Monitoring & Lifecycle"])
+app.include_router(feedback_analytics.router, prefix=f"{settings.api_prefix}/feedback-analytics", tags=["🔄 Feedback Loop & Traceability"])
 
 # =============================================================================
 # Original Demo Routes (Backward compatibility)

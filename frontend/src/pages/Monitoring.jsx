@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import {
+  Activity,
+  AlertTriangle,
+  ShieldCheck,
+  CheckCircle2,
+  RotateCcw,
+  Play,
+  Layers,
+  Sparkles,
+  ArrowRight,
+  RefreshCw,
+} from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import ProjectPicker from '../components/common/ProjectPicker'
 import Spinner from '../components/common/Spinner'
@@ -54,6 +66,13 @@ export default function Monitoring() {
   const [feedback, setFeedback] = useState(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [spotLoading, setSpotLoading] = useState(false)
+  const [driftReport, setDriftReport] = useState(null)
+  const [modelHistory, setModelHistory] = useState([])
+  const [candidateInfo, setCandidateInfo] = useState(null)
+  const [candidateTraining, setCandidateTraining] = useState(false)
+  const [candidatePromoting, setCandidatePromoting] = useState(false)
+  const [rollbackLoading, setRollbackLoading] = useState(false)
+  const [actionMsg, setActionMsg] = useState(null)
 
   const readyProjects = useMemo(
     () => projects.filter((p) => p.status === 'ready' || p.status === 'trained'),
@@ -115,7 +134,7 @@ export default function Monitoring() {
     setDetailLoading(true)
     setLastProjectId(id)
     try {
-      const [pRes, sRes, fRes] = await Promise.all([
+      const [pRes, sRes, fRes, dRes, hRes] = await Promise.all([
         fetch(`/api/projects/${id}`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`/api/projects/${id}/spot-check?limit=50`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -123,16 +142,96 @@ export default function Monitoring() {
         fetch(`/api/projects/${id}/feedback-summary`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
+        fetch(`/api/monitoring/projects/${id}/drift`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`/api/monitoring/projects/${id}/history`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
       ])
       setProject(pRes.ok ? await pRes.json() : null)
       setSpotCheck(sRes.ok ? await sRes.json() : null)
       setFeedback(fRes.ok ? await fRes.json() : null)
+      setDriftReport(dRes.ok ? await dRes.json() : null)
+      setModelHistory(hRes.ok ? await hRes.json() : [])
     } catch {
       setProject(null)
       setSpotCheck(null)
       setFeedback(null)
+      setDriftReport(null)
+      setModelHistory([])
     }
     setDetailLoading(false)
+  }
+
+  const handleTrainCandidate = async (triggerReason = 'Evidence-based drift trigger') => {
+    if (!token || !projectId) return
+    setCandidateTraining(true)
+    setActionMsg(null)
+    try {
+      const res = await fetch(`/api/monitoring/projects/${projectId}/candidate/train`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ trigger_reason: triggerReason }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Candidate training failed')
+      setCandidateInfo(data)
+      setActionMsg({ type: 'success', text: `Candidate ${data.candidate_version} trained in isolation!` })
+      loadDetail(projectId)
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message })
+    } finally {
+      setCandidateTraining(false)
+    }
+  }
+
+  const handlePromoteCandidate = async (candId, force = false) => {
+    if (!token || !projectId || !candId) return
+    setCandidatePromoting(true)
+    setActionMsg(null)
+    try {
+      const res = await fetch(`/api/monitoring/projects/${projectId}/candidate/${candId}/promote`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ force }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Promotion failed')
+      setCandidateInfo(null)
+      setActionMsg({ type: 'success', text: data.message })
+      loadDetail(projectId)
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message })
+    } finally {
+      setCandidatePromoting(false)
+    }
+  }
+
+  const handleRollback = async () => {
+    if (!token || !projectId) return
+    setRollbackLoading(true)
+    setActionMsg(null)
+    try {
+      const res = await fetch(`/api/monitoring/projects/${projectId}/rollback`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Rollback failed')
+      setActionMsg({ type: 'success', text: data.message })
+      loadDetail(projectId)
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message })
+    } finally {
+      setRollbackLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -435,6 +534,363 @@ export default function Monitoring() {
                       No outcome log yet. Log results from Cases or follow-up check-ins.
                     </p>
                   )}
+                </div>
+              </section>
+
+              {/* Status Message */}
+              {actionMsg && (
+                <div
+                  className={`p-4 rounded-xl border text-xs flex items-center justify-between ${
+                    actionMsg.type === 'success'
+                      ? 'border-teal/30 bg-teal/10 text-teal'
+                      : 'border-coral/30 bg-coral/10 text-coral'
+                  }`}
+                >
+                  <span>{actionMsg.text}</span>
+                  <button onClick={() => setActionMsg(null)} className="text-muted hover:text-ink">
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Feature & Distribution Drift Monitoring */}
+              <section className="border border-mist rounded-panel bg-surface overflow-hidden">
+                <div className="px-5 py-4 border-b border-mist flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="p-1 rounded bg-teal/10 text-teal">
+                        <Activity className="h-4 w-4" />
+                      </span>
+                      <h3 className="font-display text-base font-semibold text-ink">
+                        Distribution Drift & Model Health
+                      </h3>
+                    </div>
+                    <p className="text-xs text-[var(--muted)] mt-1">
+                      Continuous statistical checks comparing training baseline vs incoming production cases.
+                    </p>
+                  </div>
+
+                  {driftReport && (
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded font-semibold uppercase tracking-wider ${
+                          driftReport.health_status === 'HEALTHY'
+                            ? 'bg-teal/10 text-teal'
+                            : driftReport.health_status === 'WARNING'
+                              ? 'bg-ink/10 text-ink'
+                              : 'bg-coral/10 text-coral'
+                        }`}
+                      >
+                        {driftReport.health_status}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 space-y-4">
+                  {driftReport ? (
+                    <>
+                      {/* Retraining evidence trigger alert */}
+                      <div
+                        className={`p-4 rounded-xl border text-xs space-y-1 ${
+                          driftReport.retrain_recommended
+                            ? 'border-coral/30 bg-coral/5 text-coral'
+                            : 'border-teal/30 bg-teal/5 text-teal'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 font-semibold">
+                          {driftReport.retrain_recommended ? (
+                            <AlertTriangle className="h-4 w-4" />
+                          ) : (
+                            <CheckCircle2 className="h-4 w-4" />
+                          )}
+                          <span>
+                            {driftReport.retrain_recommended
+                              ? 'Evidence-Based Retraining Trigger Recommended'
+                              : 'No Retraining Required'}
+                          </span>
+                        </div>
+                        <p className="text-muted leading-relaxed pl-6">
+                          {driftReport.retrain_reason}
+                        </p>
+                      </div>
+
+                      {/* Summary stats */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                        <div className="p-3 rounded-lg bg-paper border border-mist">
+                          <span className="text-muted block text-[11px]">Monitored Features</span>
+                          <span className="text-lg font-bold text-ink mt-0.5 block">
+                            {driftReport.summary?.total_features_monitored || 0}
+                          </span>
+                        </div>
+                        <div className="p-3 rounded-lg bg-paper border border-mist">
+                          <span className="text-muted block text-[11px]">Severe Drift</span>
+                          <span className="text-lg font-bold text-coral mt-0.5 block">
+                            {driftReport.summary?.features_with_drift || 0}
+                          </span>
+                        </div>
+                        <div className="p-3 rounded-lg bg-paper border border-mist">
+                          <span className="text-muted block text-[11px]">Moderate Warnings</span>
+                          <span className="text-lg font-bold text-ink mt-0.5 block">
+                            {driftReport.summary?.features_with_warnings || 0}
+                          </span>
+                        </div>
+                        <div className="p-3 rounded-lg bg-paper border border-mist">
+                          <span className="text-muted block text-[11px]">Stable Features</span>
+                          <span className="text-lg font-bold text-teal mt-0.5 block">
+                            {driftReport.summary?.features_normal || 0}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Features table */}
+                      {driftReport.features && driftReport.features.length > 0 && (
+                        <div className="overflow-x-auto rounded-xl border border-mist">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-paper text-muted uppercase text-[10px] tracking-wider border-b border-mist">
+                              <tr>
+                                <th className="py-2.5 px-3">Feature Name</th>
+                                <th className="py-2.5 px-3">Type</th>
+                                <th className="py-2.5 px-3">PSI Metric</th>
+                                <th className="py-2.5 px-3">KS p-value</th>
+                                <th className="py-2.5 px-3">Missing Shift</th>
+                                <th className="py-2.5 px-3 text-right">Drift Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-mist text-ink">
+                              {driftReport.features.map((f, idx) => (
+                                <tr key={idx} className="hover:bg-white/[0.02]">
+                                  <td className="py-2.5 px-3 font-medium text-teal">{f.feature}</td>
+                                  <td className="py-2.5 px-3 text-muted uppercase text-[10px]">
+                                    {f.type}
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono">
+                                    {f.psi != null ? f.psi.toFixed(3) : '—'}
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono">
+                                    {f.ks_p_value != null ? f.ks_p_value.toFixed(4) : '—'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-muted">
+                                    {f.null_rate_change != null
+                                      ? `${(f.null_rate_change * 100).toFixed(1)}%`
+                                      : '0.0%'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-right">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-[11px] font-medium ${
+                                        f.status === 'drift_detected'
+                                          ? 'bg-coral/10 text-coral'
+                                          : f.status === 'warning'
+                                            ? 'bg-ink/10 text-ink'
+                                            : 'bg-teal/10 text-teal'
+                                      }`}
+                                    >
+                                      {f.status === 'drift_detected'
+                                        ? 'Drift Detected'
+                                        : f.status === 'warning'
+                                          ? 'Warning'
+                                          : 'Stable'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-[var(--muted)]">Loading statistical drift analysis...</p>
+                  )}
+                </div>
+              </section>
+
+              {/* Safe Candidate Model Retraining & Lifecycle */}
+              <section className="border border-mist rounded-panel bg-surface overflow-hidden">
+                <div className="px-5 py-4 border-b border-mist flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="p-1 rounded bg-teal/10 text-teal">
+                        <ShieldCheck className="h-4 w-4" />
+                      </span>
+                      <h3 className="font-display text-base font-semibold text-ink">
+                        Safe Model Retraining & Deployment Lifecycle
+                      </h3>
+                    </div>
+                    <p className="text-xs text-[var(--muted)] mt-1">
+                      Candidates train in isolation. Promotions are gated by acceptance criteria; previous versions support instant rollback.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleTrainCandidate()}
+                      disabled={candidateTraining}
+                      className="px-3.5 py-1.5 rounded-lg bg-teal text-paper font-semibold text-xs hover:bg-teal/90 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {candidateTraining ? (
+                        <>
+                          <Spinner className="h-3.5 w-3.5 text-paper" /> Training Candidate...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="h-3.5 w-3.5" /> Train Isolated Candidate
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleRollback}
+                      disabled={rollbackLoading || modelHistory.length < 2}
+                      className="px-3 py-1.5 rounded-lg border border-mist bg-paper text-ink font-medium text-xs hover:border-coral/50 hover:text-coral transition-colors disabled:opacity-40 flex items-center gap-1.5"
+                      title="Roll back active model to previous production version"
+                    >
+                      <RotateCcw className={`h-3.5 w-3.5 ${rollbackLoading ? 'animate-spin' : ''}`} />
+                      Rollback Version
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-5 space-y-5">
+                  {/* Active candidate evaluation card if one is being tested */}
+                  {candidateInfo?.evaluation_comparison && (
+                    <div className="p-4 rounded-xl border border-teal/30 bg-teal/5 space-y-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-ink text-sm">
+                          Candidate Evaluation: {candidateInfo.candidate_version} vs Active (
+                          {candidateInfo.evaluation_comparison.active_version})
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded font-semibold text-[11px] ${
+                            candidateInfo.evaluation_comparison.passes_acceptance_criteria
+                              ? 'bg-teal/10 text-teal'
+                              : 'bg-coral/10 text-coral'
+                          }`}
+                        >
+                          {candidateInfo.evaluation_comparison.passes_acceptance_criteria
+                            ? 'Acceptance Criteria Passed'
+                            : 'Acceptance Criteria Failed'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                        <div className="p-2.5 rounded bg-paper border border-mist">
+                          <span className="text-muted block text-[10px]">Active AUC-ROC</span>
+                          <span className="font-bold text-ink">
+                            {candidateInfo.evaluation_comparison.active_metrics?.auc_roc ?? '—'}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded bg-paper border border-mist">
+                          <span className="text-muted block text-[10px]">Candidate AUC-ROC</span>
+                          <span className="font-bold text-teal">
+                            {candidateInfo.evaluation_comparison.candidate_metrics?.auc_roc ?? '—'}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded bg-paper border border-mist">
+                          <span className="text-muted block text-[10px]">Active Accuracy</span>
+                          <span className="font-bold text-ink">
+                            {candidateInfo.evaluation_comparison.active_metrics?.accuracy ?? '—'}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded bg-paper border border-mist">
+                          <span className="text-muted block text-[10px]">Candidate Accuracy</span>
+                          <span className="font-bold text-teal">
+                            {candidateInfo.evaluation_comparison.candidate_metrics?.accuracy ?? '—'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Criteria list */}
+                      <div className="space-y-1.5 pt-1">
+                        {candidateInfo.evaluation_comparison.acceptance_criteria?.map((c, i) => (
+                          <div key={i} className="flex items-center gap-2 text-[11px]">
+                            {c.passed ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-teal" />
+                            ) : (
+                              <AlertTriangle className="h-3.5 w-3.5 text-coral" />
+                            )}
+                            <span className={c.passed ? 'text-ink' : 'text-coral'}>{c.criterion}</span>
+                            <span className="text-muted font-mono">({c.delta >= 0 ? `+${c.delta}` : c.delta})</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Promotion actions */}
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-mist/50">
+                        <button
+                          onClick={() =>
+                            handlePromoteCandidate(candidateInfo.candidate_model_id, false)
+                          }
+                          disabled={
+                            candidatePromoting ||
+                            !candidateInfo.evaluation_comparison.passes_acceptance_criteria
+                          }
+                          className="px-4 py-1.5 rounded-lg bg-teal text-paper font-bold text-xs hover:bg-teal/90 transition-all disabled:opacity-40"
+                        >
+                          Promote to Production
+                        </button>
+
+                        {!candidateInfo.evaluation_comparison.passes_acceptance_criteria && (
+                          <button
+                            onClick={() =>
+                              handlePromoteCandidate(candidateInfo.candidate_model_id, true)
+                            }
+                            disabled={candidatePromoting}
+                            className="px-3 py-1.5 rounded-lg border border-coral text-coral font-medium text-xs hover:bg-coral/10 transition-all"
+                          >
+                            Force Promote Override
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Model version history */}
+                  <div className="space-y-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                      Model Version Audit Trail ({modelHistory.length} Versions)
+                    </span>
+                    <div className="overflow-x-auto rounded-xl border border-mist">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-paper text-muted uppercase text-[10px] tracking-wider border-b border-mist">
+                          <tr>
+                            <th className="py-2 px-3">Version</th>
+                            <th className="py-2 px-3">Status</th>
+                            <th className="py-2 px-3">Trained At</th>
+                            <th className="py-2 px-3">Samples</th>
+                            <th className="py-2 px-3">Accuracy</th>
+                            <th className="py-2 px-3 text-right">AUC-ROC</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-mist text-ink">
+                          {modelHistory.map((m, idx) => (
+                            <tr key={idx} className={m.is_active ? 'bg-teal/5 font-semibold' : 'hover:bg-white/[0.02]'}>
+                              <td className="py-2 px-3 text-teal font-mono">{m.version}</td>
+                              <td className="py-2 px-3">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                    m.is_active
+                                      ? 'bg-teal/10 text-teal'
+                                      : 'bg-paper text-muted border border-mist'
+                                  }`}
+                                >
+                                  {m.is_active ? 'Active Production' : 'Archived / Rollback Ready'}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-muted">
+                                {m.trained_at ? new Date(m.trained_at).toLocaleString() : '—'}
+                              </td>
+                              <td className="py-2 px-3 text-muted">{m.training_samples?.toLocaleString() || '—'}</td>
+                              <td className="py-2 px-3">{m.accuracy != null ? `${(m.accuracy * 100).toFixed(1)}%` : '—'}</td>
+                              <td className="py-2 px-3 text-right font-medium">
+                                {m.auc_roc != null ? m.auc_roc.toFixed(3) : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>

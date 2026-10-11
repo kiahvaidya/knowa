@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { PredictionPanel } from '../components/PredictionPanel'
+import CounterfactualCard from '../components/CounterfactualCard'
 import ProjectPicker from '../components/common/ProjectPicker'
 import OrgHealthStrip from '../components/common/OrgHealthStrip'
 import Spinner from '../components/common/Spinner'
@@ -535,6 +536,19 @@ export default function Cases() {
                           selectedRowIdx != null ? `?row=${selectedRowIdx}` : ''
                         }`}
                         simulateLabel="Explore a what-if"
+                      />
+
+                      <CounterfactualCard
+                        projectId={projectId}
+                        predictionId={prediction.prediction_id || prediction.id}
+                        features={
+                          prediction.features ||
+                          (testData?.rows && selectedRowIdx != null
+                            ? testData.rows[selectedRowIdx]
+                            : {})
+                        }
+                        currentProbability={prediction.probability}
+                        token={token}
                       />
                     </div>
                   )}

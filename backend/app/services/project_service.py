@@ -1094,8 +1094,97 @@ class ProjectService:
             self.db.refresh(prediction)
             result["prediction_id"] = prediction.id
             result["persisted"] = True
-        
+
+        # Feature 1: Actionable Counterfactual Explanations
+        if not is_regression and include_explanations:
+            try:
+                result["counterfactuals"] = self.generate_counterfactual(
+                    project_id=project_id,
+                    features=features,
+                    entity_id=entity_id,
+                    top_drivers=top_factors,
+                )
+            except Exception as e:
+                logger.warning("Counterfactual generation error in predict: %s", e)
+                result["counterfactuals"] = None
+
         return result
+
+    def generate_counterfactual(
+        self,
+        project_id: str,
+        features: dict[str, Any],
+        entity_id: Optional[str] = None,
+        top_drivers: Optional[list[dict[str, Any]]] = None,
+        max_scenarios: int = 4,
+    ) -> dict[str, Any]:
+        """Generate actionable counterfactual explanations for a project case."""
+        from app.ml.model_loader import load_routed_model
+        from app.ml.feature_validation import validate_required_features
+        from app.ml.explainers.counterfactual import CounterfactualExplainer
+        from app.ml.pipelines.feature_pipeline import FeatureTransformer
+
+        project = self.get_project(project_id)
+        if not project or project.status not in ["trained", "ready"]:
+            raise ValueError("Project not found or not trained")
+
+        trained_model = self.get_active_model(project_id)
+        if not trained_model:
+            raise ValueError("No trained model available")
+
+        validate_required_features(features, project.feature_columns or [])
+
+        model = load_routed_model(
+            trained_model.model_path,
+            problem_type=project.problem_type,
+        )
+
+        ft_path = os.path.join(trained_model.model_path, "feature_transformer.joblib")
+        transformer = None
+        if os.path.exists(ft_path):
+            transformer = FeatureTransformer()
+            transformer.load(trained_model.model_path)
+
+        def predict_fn(raw_df: pd.DataFrame) -> np.ndarray:
+            if transformer is not None:
+                df_clean = pd.DataFrame(
+                    [{c: row.get(c) for c in project.feature_columns} for _, row in raw_df.iterrows()]
+                )
+                trans_df = transformer.transform(df_clean)
+            else:
+                trans_df = raw_df
+            if hasattr(model, "predict_proba"):
+                res = model.predict_proba(trans_df)
+                if isinstance(res, np.ndarray) and res.ndim > 1:
+                    return res[:, 1]
+                return np.asarray(res).flatten()
+            elif hasattr(model, "predict"):
+                return np.asarray(model.predict(trans_df)).flatten()
+            return np.zeros(len(raw_df))
+
+        ref_df = None
+        if project.dataset:
+            try:
+                parquet_path = project.dataset.file_path.replace(".csv", ".parquet")
+                if os.path.exists(parquet_path):
+                    ref_df = pd.read_parquet(parquet_path)
+            except Exception:
+                pass
+
+        explainer = CounterfactualExplainer(
+            predict_fn=predict_fn,
+            feature_names=project.feature_columns,
+            reference_data=ref_df,
+            feature_config=project.feature_config,
+        )
+
+        instance_raw = pd.DataFrame([features])
+        return explainer.generate_counterfactuals(
+            instance_df=instance_raw,
+            raw_features=features,
+            top_drivers=top_drivers,
+            max_scenarios=max_scenarios,
+        )
 
     def predict_batch(
         self,

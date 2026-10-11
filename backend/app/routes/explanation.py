@@ -46,3 +46,24 @@ async def generate_explanation(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Explanation generation failed: {str(e)}")
+
+
+@router.get("/{prediction_id}/counterfactual")
+async def get_counterfactual_explanation(
+    prediction_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate actionable counterfactual explanations for a prediction.
+    
+    Identifies minimal, feasible modifications to controllable features that alter
+    the model's prediction while strictly respecting immutability constraints.
+    """
+    service = ExplainabilityService(db)
+    try:
+        result = service.get_counterfactual(prediction_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Counterfactual search failed: {str(e)}")

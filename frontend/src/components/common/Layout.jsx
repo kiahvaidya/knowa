@@ -29,10 +29,22 @@ const navItems = [
     hint: 'Test scenarios before you act',
   },
   {
+    path: '/decision-studio',
+    match: (p) => p.startsWith('/decision-studio'),
+    label: 'Decision Studio',
+    hint: 'Constraint-aware business optimizer',
+  },
+  {
+    path: '/evaluation-lab',
+    match: (p) => p.startsWith('/evaluation-lab'),
+    label: 'Evaluation Lab',
+    hint: 'Trust, calibration, and conformal benchmark',
+  },
+  {
     path: '/monitoring',
     match: (p) => p.startsWith('/monitoring'),
     label: 'Monitoring',
-    hint: 'Model quality and learning',
+    hint: 'Drift and safe model updates',
   },
   {
     path: '/projects',

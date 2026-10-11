@@ -598,6 +598,32 @@ async def scenario_levers(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/{project_id}/counterfactual")
+async def generate_counterfactual(
+    project_id: str,
+    request: PredictRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate actionable, feasible counterfactual recommendations for a case.
+    Strictly preserves immutable attributes and respects valid domain bounds.
+    """
+    from app.ml.feature_validation import FeatureValidationError
+
+    service = ProjectService(db, auth.org_id)
+    try:
+        return service.generate_counterfactual(
+            project_id=project_id,
+            features=request.features,
+            entity_id=request.entity_id,
+        )
+    except FeatureValidationError as e:
+        raise HTTPException(status_code=400, detail=e.as_detail())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/{project_id}/feedback")
 async def record_feedback(
     project_id: str,

@@ -238,3 +238,37 @@ class ExplainabilityService:
                 "contribution": "increases_risk" if importance > 0 else "decreases_risk",
             })
         return explanations
+
+    def get_counterfactual(self, prediction_id: str) -> dict[str, Any]:
+        """Generate actionable counterfactual explanations for a prediction."""
+        if self.model is None or not self.model.is_trained:
+            raise ValueError("No trained model available")
+        prediction = self.db.query(Prediction).filter(
+            Prediction.id == prediction_id
+        ).first()
+        if not prediction:
+            raise ValueError(f"Prediction {prediction_id} not found")
+        features = prediction.features_snapshot
+        feature_df = preprocess_features(features)
+
+        from app.ml.explainers.counterfactual import CounterfactualExplainer
+
+        def predict_fn(df):
+            return self.model.predict_proba(df)
+
+        explainer = CounterfactualExplainer(
+            predict_fn=predict_fn,
+            feature_names=list(feature_df.columns),
+            reference_data=self.training_data,
+        )
+
+        explanation = self.get_explanation(prediction_id)
+        top_drivers = None
+        if explanation and "shap_explanations" in explanation:
+            top_drivers = explanation["shap_explanations"]
+
+        return explainer.generate_counterfactuals(
+            instance_df=feature_df,
+            raw_features=features,
+            top_drivers=top_drivers,
+        )
