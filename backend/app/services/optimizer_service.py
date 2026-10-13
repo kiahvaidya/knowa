@@ -19,8 +19,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import linprog
 
-from app.recommendations.action_catalog import ACTION_CATALOG, Action, get_action
-from app.recommendations.domains import detect_domain
+from app.recommendations.action_catalog import ACTION_CATALOG, Action, get_action, get_catalog
+from app.recommendations.domains import DOMAIN_DISPLAY_NAMES, DOMAIN_UNIT_LABELS, detect_domain
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class ActionOption:
     roi_ratio: float
     uncertainty_penalty: float
     reasoning: str
+    baseline_probability: float = 0.5
 
 
 @dataclass
@@ -156,8 +157,15 @@ class DecisionOptimizer:
         best_name = "knapsack_optimal" if "knapsack_optimal" in results else "greedy_roi"
         candidates_count = len(candidates)
 
+        domain_name = DOMAIN_DISPLAY_NAMES.get(self.domain, self.domain.title())
+        unit_label = DOMAIN_UNIT_LABELS.get(self.domain, "Saved Account / Case")
+
         return {
             "success": True,
+            "domain": self.domain,
+            "domain_display_name": domain_name,
+            "unit_label": f"Value per {unit_label}",
+            "candidate_actions_evaluated": len(options),
             "configured_budget": self.budget,
             "max_capacity": self.max_capacity,
             "candidate_pool_size": candidates_count,
@@ -183,7 +191,7 @@ class DecisionOptimizer:
         """Generate and score eligible actions for each candidate case."""
         options: list[ActionOption] = []
 
-        catalog = dict(ACTION_CATALOG)
+        catalog = dict(get_catalog(self.domain))
         if custom_actions:
             for ca in custom_actions:
                 code = ca.get("code") or ca.get("id")
@@ -198,9 +206,15 @@ class DecisionOptimizer:
                         category="save",
                     )
 
+        # Dynamic risk threshold: adapt if candidate pool has lower base probability
+        min_prob_threshold = 0.15
+        if candidates and all(c.baseline_probability < 0.20 for c in candidates):
+            probs = [c.baseline_probability for c in candidates]
+            min_prob_threshold = max(0.01, float(np.median(probs)) * 0.75)
+
         for idx, cand in enumerate(candidates):
             # Only consider actionable cases with non-negligible risk
-            if cand.baseline_probability < 0.20:
+            if cand.baseline_probability < min_prob_threshold:
                 continue
 
             for code, action in catalog.items():
@@ -246,13 +260,14 @@ class DecisionOptimizer:
                         roi_ratio=roi_ratio,
                         uncertainty_penalty=penalty,
                         reasoning=reasoning,
+                        baseline_probability=cand.baseline_probability,
                     )
                 )
 
         return options
 
     def _is_action_eligible(self, action: Action, cand: CandidateCase) -> bool:
-        """Check business eligibility conditions."""
+        """Check business eligibility conditions across any domain."""
         conds = action.applicable_conditions or {}
         if not conds:
             return True
@@ -260,25 +275,60 @@ class DecisionOptimizer:
         if "min_probability" in conds and cand.baseline_probability < conds["min_probability"]:
             return False
 
-        contract = str(cand.features.get("contract_type", cand.features.get("Contract", ""))).lower()
+        # Build normalized feature lookup
+        feat_norm = {
+            str(k).lower().replace("_", "").replace("-", "").replace(" ", ""): v
+            for k, v in cand.features.items()
+        }
+
         if "contract_type_in" in conds:
-            allowed = [str(x).lower() for x in conds["contract_type_in"]]
-            if contract and contract not in allowed:
-                return False
+            for k in ("contracttype", "contract", "plantype", "tier"):
+                if k in feat_norm:
+                    contract_val = str(feat_norm[k]).lower()
+                    allowed = [str(x).lower() for x in conds["contract_type_in"]]
+                    if contract_val not in allowed:
+                        return False
+                    break
+
+        if "feature_matches" in conds and isinstance(conds["feature_matches"], dict):
+            for f_name, expected in conds["feature_matches"].items():
+                norm_fn = str(f_name).lower().replace("_", "").replace("-", "").replace(" ", "")
+                if norm_fn in feat_norm:
+                    actual = str(feat_norm[norm_fn]).lower()
+                    expected_list = expected if isinstance(expected, (list, tuple)) else [expected]
+                    if actual not in [str(x).lower() for x in expected_list]:
+                        return False
 
         return True
 
     def _calculate_dollar_cost(self, action: Action, cand: CandidateCase) -> float:
-        """Scale base cost into realistic local currency amount."""
-        monthly_charges = float(
-            cand.features.get("monthly_charges", cand.features.get("MonthlyCharges", 65.0)) or 65.0
-        )
-        # If action is a percentage discount:
+        """Calculate local currency action cost based on catalog definition and candidate value."""
+        base = float(action.base_cost)
+        if base >= 5.0:
+            return round(base, 2)
+
+        # For percentage/ratio base cost (e.g. 0.10, 0.20):
+        # Find numeric periodic value in candidate features
+        periodic_val = None
+        for key in ("monthlycharges", "monthlycharges", "mrr", "charges", "balance", "salary", "amount"):
+            for feat_k, feat_v in cand.features.items():
+                if str(feat_k).lower().replace("_", "").replace("-", "") == key:
+                    try:
+                        periodic_val = float(feat_v)
+                        break
+                    except (ValueError, TypeError):
+                        pass
+            if periodic_val is not None:
+                break
+
+        if periodic_val is None:
+            periodic_val = (cand.customer_value / 12.0) if cand.customer_value > 0 else 65.0
+
         code = action.code.lower()
-        if "discount_10" in code:
-            return round(monthly_charges * 0.10 * 6.0, 2)  # 6-month discount
-        elif "discount_20" in code:
-            return round(monthly_charges * 0.20 * 6.0, 2)
+        if "discount_10" in code or "10_pct" in code:
+            return round(periodic_val * 0.10 * 6.0, 2)
+        elif "discount_20" in code or "20_pct" in code:
+            return round(periodic_val * 0.20 * 6.0, 2)
         elif "upgrade_contract" in code:
             return 80.0
         elif "plan_optimization" in code:
@@ -286,8 +336,7 @@ class DecisionOptimizer:
         elif "support" in code:
             return 60.0
 
-        # General scaled cost
-        return round(max(30.0, action.base_cost * 200.0), 2)
+        return round(max(25.0, base * cand.customer_value * 0.25), 2)
 
     def _solve_knapsack(
         self,
@@ -464,6 +513,9 @@ class DecisionOptimizer:
                 "action_name": a.action_name,
                 "cost": round(a.cost, 2),
                 "expected_probability_reduction": round(a.expected_probability_reduction, 4),
+                "expected_lift": round(a.expected_probability_reduction, 4),
+                "current_risk": round(a.baseline_probability, 4),
+                "initial_risk": round(a.baseline_probability, 4),
                 "expected_benefit": round(a.expected_benefit, 2),
                 "net_benefit": round(a.net_benefit, 2),
                 "roi_ratio": round(a.roi_ratio, 2),
@@ -503,16 +555,34 @@ class DecisionOptimizer:
         )
 
     def _format_strategy(self, res: StrategyResult) -> dict[str, Any]:
+        roi_pct = ((res.total_expected_benefit / max(1.0, res.total_cost)) * 100.0) if res.total_cost > 0 else 0.0
+        binding_expl = " ; ".join(res.binding_constraints) if res.binding_constraints else res.rationale
         return {
+            "name": res.display_title,
             "strategy_name": res.strategy_name,
             "display_title": res.display_title,
             "total_cost": res.total_cost,
             "total_expected_benefit": res.total_expected_benefit,
+            "expected_benefit": res.total_expected_benefit,
             "total_net_benefit": res.total_net_benefit,
+            "net_benefit": res.total_net_benefit,
             "interventions_count": res.interventions_count,
+            "selected_count": res.interventions_count,
             "budget_utilization_pct": res.budget_utilization_pct,
             "capacity_utilization_pct": res.capacity_utilization_pct,
+            "roi_percent": round(roi_pct, 1),
             "binding_constraints": res.binding_constraints,
+            "binding_constraint_explanation": binding_expl,
             "rationale": res.rationale,
+            "algorithm": (
+                "HiGHS Mixed-Integer LP (Global Optimal)"
+                if "knapsack" in res.strategy_name
+                else "Greedy Marginal ROI"
+                if "greedy" in res.strategy_name
+                else "Priority Risk-First Heuristic"
+                if "risk" in res.strategy_name
+                else "No-Action Baseline"
+            ),
             "allocated_actions": res.allocated_actions,
+            "selected_actions": res.allocated_actions,
         }

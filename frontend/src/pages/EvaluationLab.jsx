@@ -25,26 +25,52 @@ import Spinner from '../components/common/Spinner'
 
 export default function EvaluationLab() {
   const { token } = useAuth()
+  const [projects, setProjects] = useState([])
+  const [selectedTarget, setSelectedTarget] = useState('standard')
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
 
-  // Fetch latest benchmark report
-  const fetchLatestReport = async () => {
+  // Fetch registered user projects
+  useEffect(() => {
+    if (!token) return
+    ;(async () => {
+      try {
+        const res = await fetch('/api/projects', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setProjects(data)
+        }
+      } catch (err) {
+        console.error('Failed to load projects in EvaluationLab', err)
+      }
+    })()
+  }, [token])
+
+  // Fetch benchmark report for specific target
+  const fetchReport = async (targetId = selectedTarget) => {
     if (!token) return
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/evaluation/latest', {
+      const url =
+        targetId === 'standard'
+          ? '/api/evaluation/latest'
+          : `/api/evaluation/latest?project_id=${targetId}`
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
         const data = await res.json()
         setReport(data)
-      } else {
+      } else if (targetId === 'standard') {
         // Run first benchmark automatically if no report exists
-        runBenchmark()
+        runBenchmark(targetId)
+      } else {
+        setReport(null)
       }
     } catch (err) {
       setError(err.message || 'Failed to fetch evaluation report')
@@ -53,23 +79,34 @@ export default function EvaluationLab() {
     }
   }
 
-  // Trigger real-time benchmark run
-  const runBenchmark = async () => {
+  // Trigger benchmark run
+  const runBenchmark = async (targetId = selectedTarget) => {
     if (!token) return
     setRunning(true)
     setError(null)
     try {
-      const res = await fetch('/api/evaluation/run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          experiment_name: 'IBM_Telco_RealWorld_Benchmark',
-          random_seed: 42,
-        }),
-      })
+      let res
+      if (targetId === 'standard') {
+        res = await fetch('/api/evaluation/run', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            experiment_name: 'IBM_Telco_RealWorld_Benchmark',
+            random_seed: 42,
+          }),
+        })
+      } else {
+        res = await fetch(`/api/evaluation/projects/${targetId}/evaluate`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+      }
+
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}))
         throw new Error(errJson.detail || 'Benchmark run failed')
@@ -84,18 +121,34 @@ export default function EvaluationLab() {
     }
   }
 
+  const handleTargetChange = (newTarget) => {
+    setSelectedTarget(newTarget)
+    fetchReport(newTarget)
+  }
+
   useEffect(() => {
-    fetchLatestReport()
+    fetchReport('standard')
   }, [token])
 
-  // Prepare calibration chart data
-  const calibrationData = (report?.calibration_curves?.ensemble || []).map((bin, idx) => ({
-    bin: `${Math.round(bin.bin_start * 100)}-${Math.round(bin.bin_end * 100)}%`,
-    ideal: (bin.bin_start + bin.bin_end) / 2,
-    predicted: bin.mean_predicted_prob,
-    observed: bin.observed_positive_rate,
-    samples: bin.sample_count,
-  }))
+  // Prepare calibration chart data safely
+  const calibrationData = (report?.calibration_curves?.ensemble || []).map((bin, idx) => {
+    const ideal =
+      bin.bin_start != null && bin.bin_end != null
+        ? (bin.bin_start + bin.bin_end) / 2
+        : (idx + 0.5) / 10
+    const binLabel =
+      bin.bin_range ||
+      `${Math.round((bin.bin_start ?? idx / 10) * 100)}-${Math.round(
+        (bin.bin_end ?? (idx + 1) / 10) * 100
+      )}%`
+    return {
+      bin: binLabel,
+      ideal: ideal,
+      predicted: bin.mean_predicted_prob ?? bin.predicted_prob ?? 0,
+      observed: bin.observed_positive_rate ?? bin.empirical_prob ?? 0,
+      samples: bin.sample_count ?? 0,
+    }
+  })
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
@@ -109,25 +162,44 @@ export default function EvaluationLab() {
             <h1 className="text-2xl font-bold text-ink">Model Trust & Evaluation Lab</h1>
           </div>
           <p className="text-sm text-muted mt-1">
-            Rigorous empirical benchmarking: test-set separation, calibration curves, conformal prediction, and baselines.
+            Rigorous empirical benchmarking across any registered domain: held-out separation, calibration curves, conformal prediction, and baselines.
           </p>
         </div>
 
-        <button
-          onClick={runBenchmark}
-          disabled={running}
-          className="px-5 py-2.5 rounded-lg bg-teal text-paper font-bold text-xs hover:bg-teal/90 transition-all disabled:opacity-50 flex items-center gap-2 shadow-md self-start md:self-auto"
-        >
-          {running ? (
-            <>
-              <Spinner className="h-4 w-4 text-paper" /> Benchmarking Held-out Test Set...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" /> Re-run Real-World Benchmark
-            </>
-          )}
-        </button>
+        {/* Dataset & Project Selector */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted font-medium">Dataset:</span>
+            <select
+              value={selectedTarget}
+              onChange={(e) => handleTargetChange(e.target.value)}
+              className="bg-surface text-ink text-xs border border-mist rounded-lg px-3 py-2 outline-none focus:border-teal"
+            >
+              <option value="standard">IBM Telco Customer Churn (Baseline Benchmark)</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.target_column || 'Target'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={() => runBenchmark(selectedTarget)}
+            disabled={running}
+            className="px-5 py-2.5 rounded-lg bg-teal text-paper font-bold text-xs hover:bg-teal/90 transition-all disabled:opacity-50 flex items-center gap-2 shadow-md"
+          >
+            {running ? (
+              <>
+                <Spinner className="h-4 w-4 text-paper" /> Benchmarking Held-out Test Set...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4" /> Run Lab Benchmark
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -148,12 +220,18 @@ export default function EvaluationLab() {
         <>
           {/* Dataset Provenance Card */}
           <div className="p-5 rounded-xl bg-surface border border-mist flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
-            <div className="space-y-1">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-teal">Benchmark Dataset</span>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-teal">Dataset & Domain</span>
+                <span className="px-2.5 py-0.5 rounded-full bg-teal/10 text-teal text-[11px] font-semibold border border-teal/20">
+                  Domain: {report.dataset?.domain_display_name || report.dataset?.domain || 'General Business'}
+                </span>
+              </div>
               <h3 className="text-sm font-bold text-ink">{report.dataset?.name}</h3>
               <p className="text-muted">
-                {report.dataset?.total_samples?.toLocaleString()} real-world enterprise records • Held-out test set:{' '}
-                {report.dataset?.test_samples?.toLocaleString()} samples ({report.dataset?.test_split_ratio * 100}%)
+                {(report.dataset?.total_samples ?? report.dataset?.rows_total ?? 0).toLocaleString()} enterprise records • Target Column:{' '}
+                <span className="text-ink font-semibold">{report.dataset?.target_column}</span> • {report.dataset?.features_count} predictive features • Held-out test set:{' '}
+                {(report.dataset?.test_samples ?? 0).toLocaleString()} samples ({Math.round((report.dataset?.test_split_ratio ?? 0.15) * 100)}%)
               </p>
             </div>
             <div className="flex items-center gap-3 text-[11px] text-muted border-t md:border-t-0 md:border-l border-mist pt-3 md:pt-0 md:pl-5">

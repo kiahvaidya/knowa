@@ -1,5 +1,6 @@
 """Evaluation Lab API routes."""
 
+import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,7 +8,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.recommendations.domains import detect_domain
 from app.routes.auth import AuthContext, get_auth_context
+from app.services.dataset_service import DatasetService
 from app.services.evaluation_service import EvaluationLabService
 from app.services.project_service import ProjectService
 
@@ -23,10 +26,10 @@ class RunBenchmarkRequest(BaseModel):
 
 
 @router.get("/latest")
-async def get_latest_evaluation():
-    """Get latest model trust and evaluation report, or compute baseline benchmark."""
+async def get_latest_evaluation(project_id: Optional[str] = Query(default=None)):
+    """Get latest model trust and evaluation report, optionally filtered by project_id."""
     service = EvaluationLabService()
-    report = service.get_latest_report()
+    report = service.get_latest_report(project_id=project_id)
     if not report:
         raise HTTPException(status_code=404, detail="No evaluation reports available")
     return report
@@ -62,25 +65,59 @@ async def evaluate_project_dataset(
     auth: AuthContext = Depends(get_auth_context),
     db: Session = Depends(get_db),
 ):
-    """Run full trust evaluation on a SaaS project's dataset."""
+    """Run full trust evaluation on a SaaS project's dataset across its registered domain."""
     proj_service = ProjectService(db, auth.org_id)
     project = proj_service.get_project(project_id)
-    if not project or not project.dataset:
-        raise HTTPException(status_code=404, detail="Project or dataset not found")
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    df = None
+    if project.dataset_id:
+        try:
+            ds_service = DatasetService(db, auth.org_id)
+            df = ds_service.load_dataframe(project.dataset_id)
+        except Exception:
+            pass
+
+    file_path = None
+    if df is None and project.dataset:
+        file_path = project.dataset.file_path
+        if not os.path.exists(file_path):
+            if file_path.endswith(".csv"):
+                parquet_path = file_path.replace(".csv", ".parquet")
+                if os.path.exists(parquet_path):
+                    file_path = parquet_path
+            elif file_path.endswith(".parquet"):
+                csv_path = file_path.replace(".parquet", ".csv")
+                if os.path.exists(csv_path):
+                    file_path = csv_path
+
+    if df is None and (not file_path or not os.path.exists(file_path)):
+        raise HTTPException(status_code=404, detail="Project dataset file could not be located")
+
+    # Detect domain dynamically
+    sample_cols = list(df.columns) if df is not None else ([f.name for f in project.features] if project.features else None)
+    org_ind = project.organization.industry if project.organization else None
+    domain = detect_domain(
+        organization_industry=org_ind,
+        feature_columns=sample_cols,
+        project_name=project.name,
+        target_column=project.target_column,
+        target_description=project.target_description,
+        metadata_text=f"{project.name} {project.description or ''} {project.target_description or ''}",
+    )
 
     service = EvaluationLabService()
-    file_path = project.dataset.file_path
-    if not file_path.endswith(".parquet") and not file_path.endswith(".csv"):
-        parquet_path = file_path.replace(".csv", ".parquet")
-        if os.path.exists(parquet_path):
-            file_path = parquet_path
-
     try:
         report = service.run_benchmark(
+            df=df,
             dataset_path=file_path,
             target_column=project.target_column,
             positive_label=project.target_positive_label or "1",
-            experiment_name=f"project_{project.name[:20]}",
+            experiment_name=f"project_{project.name[:25]}",
+            dataset_name=project.name,
+            domain=domain,
+            project_id=project_id,
         )
         return report
     except Exception as e:

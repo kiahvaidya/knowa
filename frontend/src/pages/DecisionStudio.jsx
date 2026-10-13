@@ -30,7 +30,7 @@ export default function DecisionStudio() {
   // Optimization results
   const [optimizing, setOptimizing] = useState(false)
   const [optimizationData, setOptimizationData] = useState(null)
-  const [selectedStrategy, setSelectedStrategy] = useState('ilp_optimal_knapsack')
+  const [selectedStrategy, setSelectedStrategy] = useState('knapsack_optimal')
   const [committing, setCommitting] = useState(false)
   const [commitSuccess, setCommitSuccess] = useState(null)
   const [error, setError] = useState(null)
@@ -78,6 +78,7 @@ export default function DecisionStudio() {
             budget: Number(budget),
             max_capacity: Number(maxCapacity),
             value_per_retention: Number(valuePerRetention),
+            value_multiplier: Number(valuePerRetention),
           }),
         })
       } else {
@@ -92,6 +93,7 @@ export default function DecisionStudio() {
             budget: Number(budget),
             max_capacity: Number(maxCapacity),
             value_per_retention: Number(valuePerRetention),
+            value_multiplier: Number(valuePerRetention),
           }),
         })
       }
@@ -103,6 +105,13 @@ export default function DecisionStudio() {
 
       const data = await res.json()
       setOptimizationData(data)
+      if (data.strategies) {
+        if (!data.strategies[selectedStrategy]) {
+          setSelectedStrategy(
+            data.recommended_strategy || Object.keys(data.strategies)[0] || 'knapsack_optimal'
+          )
+        }
+      }
     } catch (err) {
       setError(err.message || 'Optimization failed')
     } finally {
@@ -116,11 +125,20 @@ export default function DecisionStudio() {
     }
   }, [selectedProjectId])
 
+  const currentStrategyObj =
+    optimizationData?.strategies?.[selectedStrategy] ||
+    optimizationData?.strategies?.['knapsack_optimal'] ||
+    Object.values(optimizationData?.strategies || {})[0] ||
+    {}
+
   // Commit selected strategy to Decision Ledger
   const handleCommitToLedger = async () => {
     if (!token || !selectedProjectId) return
     setCommitting(true)
     setError(null)
+
+    const actionsToCommit =
+      currentStrategyObj.allocated_actions || currentStrategyObj.selected_actions || []
 
     try {
       const res = await fetch(`/api/optimizer/projects/${selectedProjectId}/optimize/commit`, {
@@ -134,6 +152,7 @@ export default function DecisionStudio() {
           budget: Number(budget),
           max_capacity: Number(maxCapacity),
           value_per_retention: Number(valuePerRetention),
+          allocated_actions: actionsToCommit,
         }),
       })
 
@@ -151,7 +170,7 @@ export default function DecisionStudio() {
     }
   }
 
-  const currentStrategyObj = optimizationData?.strategies?.[selectedStrategy] || {}
+  const cur = optimizationData?.currency_symbol || '₹'
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
@@ -169,23 +188,30 @@ export default function DecisionStudio() {
           </p>
         </div>
 
-        {/* Project Selector */}
-        {projects.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted">Project:</span>
-            <select
-              value={selectedProjectId}
-              onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="bg-surface text-ink text-xs border border-mist rounded-lg px-3 py-2 outline-none focus:border-teal"
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Domain Badge & Project Selector */}
+        <div className="flex flex-wrap items-center gap-3">
+          {optimizationData?.domain_display_name && (
+            <span className="px-2.5 py-1 rounded-full bg-teal/10 text-teal text-xs font-semibold border border-teal/20">
+              Domain: {optimizationData.domain_display_name}
+            </span>
+          )}
+          {projects.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted font-medium">Project:</span>
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="bg-surface text-ink text-xs border border-mist rounded-lg px-3 py-2 outline-none focus:border-teal"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Control Panel: Budget & Capacity Sliders */}
@@ -199,7 +225,7 @@ export default function DecisionStudio() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted">Total Intervention Budget</span>
-              <span className="font-bold text-ink text-sm">₹{Number(budget).toLocaleString()}</span>
+              <span className="font-bold text-ink text-sm">{cur}{Number(budget).toLocaleString()}</span>
             </div>
             <input
               type="range"
@@ -211,9 +237,9 @@ export default function DecisionStudio() {
               className="w-full accent-teal cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-muted">
-              <span>₹10,000</span>
-              <span>₹100,000</span>
-              <span>₹200,000</span>
+              <span>{cur}10,000</span>
+              <span>{cur}100,000</span>
+              <span>{cur}200,000</span>
             </div>
           </div>
 
@@ -221,7 +247,7 @@ export default function DecisionStudio() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="text-muted">Max Intervention Capacity</span>
-              <span className="font-bold text-ink text-sm">{maxCapacity} accounts</span>
+              <span className="font-bold text-ink text-sm">{maxCapacity} cases / accounts</span>
             </div>
             <input
               type="range"
@@ -242,8 +268,8 @@ export default function DecisionStudio() {
           {/* Value per retention */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="text-muted">Value per Saved Customer</span>
-              <span className="font-bold text-ink text-sm">₹{Number(valuePerRetention).toLocaleString()}</span>
+              <span className="text-muted">{optimizationData?.unit_label || 'Value per Protected Case / Account'}</span>
+              <span className="font-bold text-ink text-sm">{cur}{Number(valuePerRetention).toLocaleString()}</span>
             </div>
             <input
               type="range"
@@ -255,9 +281,9 @@ export default function DecisionStudio() {
               className="w-full accent-teal cursor-pointer"
             />
             <div className="flex justify-between text-[10px] text-muted">
-              <span>₹2,000</span>
-              <span>₹15,000</span>
-              <span>₹30,000</span>
+              <span>{cur}2,000</span>
+              <span>{cur}15,000</span>
+              <span>{cur}30,000</span>
             </div>
           </div>
         </div>
@@ -316,7 +342,7 @@ export default function DecisionStudio() {
 
                   <div className="mt-3">
                     <span className="text-2xl font-bold text-ink">
-                      ₹{Math.round(s.net_benefit || 0).toLocaleString()}
+                      {cur}{Math.round(s.net_benefit || 0).toLocaleString()}
                     </span>
                     <span className="text-xs text-muted block mt-0.5">Expected Net Benefit</span>
                   </div>
@@ -324,7 +350,7 @@ export default function DecisionStudio() {
                   <div className="mt-4 pt-4 border-t border-mist/50 space-y-1.5 text-xs">
                     <div className="flex justify-between">
                       <span className="text-muted">Total Cost</span>
-                      <span className="text-ink font-medium">₹{Math.round(s.total_cost || 0).toLocaleString()}</span>
+                      <span className="text-ink font-medium">{cur}{Math.round(s.total_cost || 0).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted">Actions Selected</span>
@@ -409,7 +435,7 @@ export default function DecisionStudio() {
             {currentStrategyObj.selected_actions && currentStrategyObj.selected_actions.length > 0 ? (
               <div className="space-y-3">
                 <h5 className="text-xs font-semibold uppercase tracking-wider text-muted">
-                  Prioritized Action Roster ({currentStrategyObj.selected_actions.length} Accounts)
+                  Prioritized Action Roster ({currentStrategyObj.selected_actions.length} Interventions)
                 </h5>
 
                 <div className="overflow-x-auto">
@@ -429,7 +455,7 @@ export default function DecisionStudio() {
                         <tr key={idx} className="hover:bg-white/[0.02]">
                           <td className="py-2.5 px-3 font-medium text-teal">{act.entity_id || `Case #${idx + 1}`}</td>
                           <td className="py-2.5 px-3 font-semibold text-ink">{act.action_name}</td>
-                          <td className="py-2.5 px-3 text-muted">₹{Math.round(act.cost || 0).toLocaleString()}</td>
+                          <td className="py-2.5 px-3 text-muted">{cur}{Math.round(act.cost || 0).toLocaleString()}</td>
                           <td className="py-2.5 px-3 text-coral font-medium">
                             {act.current_risk ? `${Math.round(act.current_risk * 100)}%` : '—'}
                           </td>
@@ -437,7 +463,7 @@ export default function DecisionStudio() {
                             {act.expected_lift ? `${Math.round(act.expected_lift * 100)}% risk reduction` : '—'}
                           </td>
                           <td className="py-2.5 px-3 text-right font-bold text-ink">
-                            ₹{Math.round(act.expected_benefit || 0).toLocaleString()}
+                            {cur}{Math.round(act.expected_benefit || 0).toLocaleString()}
                           </td>
                         </tr>
                       ))}
