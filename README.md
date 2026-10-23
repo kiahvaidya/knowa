@@ -53,11 +53,28 @@ Complete auditability for every recommended and committed action:
 - **Causal Attribution Disclaimer**: Distinguishes observational correlation from true counterfactual causality.
 - **Verified Feedback Dataset Export**: Exports validated ground-truth outcome records for subsequent model retraining.
 
-### 6. Modern Frontend Integration
+### 6. Phase 1: Semantic Data Understanding
+- Deterministic profiling, semantic type inference, business-role detection (revenue, profit, churn, date, entity).
+- Automated target candidate detection, data hygiene scoring, and human-in-the-loop overrides.
+
+### 7. Phase 2: Multi-Dataset Intelligence
+- Dataset grain detection, entity and foreign key discovery across datasets.
+- Relationship discovery (1:1, 1:N, N:M), fan-out ratio estimation, join simulation, and double-counting safeguards.
+
+### 8. Phase 3: Dynamic Business Intelligence
+- **Analysis Opportunity Engine**: Derives meaningful business analyses dynamically from semantic roles and grain.
+- **Grain-Aware Analytics**: Safely executes descriptive, trend, comparative, correlation, anomaly, segmentation, and cross-dataset analyses with pre-aggregation safeguards.
+- **Non-Causal Association Intelligence**: Formulates bivariate correlations with p-values while strictly enforcing non-causal boundaries.
+- **Statistically Defensible Anomaly Detection**: Uncovers extreme outliers (Z > 2.5) with baseline context, magnitude, and affected segments.
+- **Proactive Insight Generation**: Deduplicates redundant observations and ranks high-value business insights by severity (`critical`, `warning`, `positive`, `info`), magnitude, and confidence.
+- **Complete Explainability Trace**: Mathematical formula, data source, relevant dimensions, and limitations available for every insight.
+
+### 9. Modern Frontend Integration
 - **Decision Studio (`/decision-studio`)**: Interactive budget sliders, capacity limits, strategy comparison cards, constraint attribution panel, and ledger commitment.
 - **Evaluation Lab (`/evaluation-lab`)**: Model comparison matrix, Recharts 10-bin calibration curves, conformal coverage monitors, and educational metric glossary.
 - **Counterfactual Card**: Embedded in Case reviews (`/cases`), showing original vs proposed values, controllable feature adjustments, cost tiers, and causal caveats.
 - **Upgraded Monitoring (`/monitoring`)**: Feature drift statistics table, health scorecards, candidate training controls, acceptance verification cards, and version rollback buttons.
+- **Data & Intelligence Views**: Dynamic business intelligence overview, multi-dataset relationship modeling, and semantic entity mapping.
 
 ---
 

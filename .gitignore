@@ -65,11 +65,13 @@ Desktop.ini
 *.rar
 
 # Trained ML models and generated data (regenerable via scripts)
+data/
 backend/data/models/
 backend/data/processed/
 backend/data/uploads/
 backend/data/raw/
 backend/data/*.db
+backend/data/eval_reports/*.json
 
 # ========================
 # Build output

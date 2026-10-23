@@ -66,7 +66,11 @@ class EvaluationLabService:
     """Orchestrates comprehensive model evaluation on real or uploaded datasets."""
 
     def __init__(self, reports_dir: Optional[str] = None):
-        self.reports_dir = reports_dir or os.path.join(settings.data_path, "eval_reports")
+        if reports_dir:
+            self.reports_dir = reports_dir
+        else:
+            base_dir = settings.data_path if os.path.exists(settings.data_path) else os.path.join("backend", settings.data_path.lstrip("./"))
+            self.reports_dir = os.path.join(base_dir, "eval_reports")
         os.makedirs(self.reports_dir, exist_ok=True)
 
     def run_benchmark(
@@ -91,8 +95,16 @@ class EvaluationLabService:
         else:
             path = dataset_path or os.path.join(settings.data_path, "benchmarks", "telco_churn.csv")
             if not os.path.exists(path):
-                # Check uploads fallback
-                path = os.path.join(settings.data_path, "processed", "churn_data.parquet")
+                # Fallback for when running tests or commands from repo root
+                root_bench = os.path.join("backend", settings.data_path.lstrip("./"), "benchmarks", "telco_churn.csv")
+                if os.path.exists(root_bench):
+                    path = root_bench
+                else:
+                    path = os.path.join(settings.data_path, "processed", "churn_data.parquet")
+                    if not os.path.exists(path):
+                        root_proc = os.path.join("backend", settings.data_path.lstrip("./"), "processed", "churn_data.parquet")
+                        if os.path.exists(root_proc):
+                            path = root_proc
 
             if path.endswith(".parquet"):
                 df = pd.read_parquet(path)
