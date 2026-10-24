@@ -1,6 +1,19 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import {
+  Briefcase,
+  Sliders,
+  Trash2,
+  ArrowRight,
+  CheckCircle2,
+  AlertTriangle,
+  Sparkles,
+  Activity,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../components/ui/Toast';
+import { Breadcrumb } from '../components/ui/Breadcrumb';
+import { Badge } from '../components/ui/Badge';
 import { PredictionPanel } from '../components/PredictionPanel';
 import Spinner from '../components/common/Spinner';
 
@@ -9,6 +22,7 @@ export default function ProjectDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { token, user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(true);
   const [training, setTraining] = useState(false);
@@ -576,20 +590,12 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 mb-4 -ml-2">
-        {fromFollowUps ? (
-          <Link to="/follow-ups" className="btn-ghost text-sm">
-            ← Follow-ups
-          </Link>
-        ) : (
-          <button type="button" onClick={() => navigate('/projects')} className="btn-ghost text-sm">
-            ← Projects
-          </button>
-        )}
-        <Link to={`/cases?project=${id}`} className="btn-ghost text-sm text-[var(--muted)]">
-          Cases
-        </Link>
-      </div>
+      <Breadcrumb
+        items={[
+          { label: 'Projects', to: '/projects' },
+          { label: project.name },
+        ]}
+      />
 
       <div className="page-header">
         <div>
@@ -602,25 +608,33 @@ export default function ProjectDetail() {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span
-            className={`badge ${
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Badge
+            variant={
               isReady
-                ? 'bg-teal-soft/50 text-ink border border-teal/20'
+                ? 'safe'
                 : project.status === 'error'
-                  ? 'bg-coral-soft text-ink border border-coral/30'
-                  : 'bg-mist text-ink'
-            }`}
+                  ? 'urgent'
+                  : 'caution'
+            }
           >
             {isReady ? 'Ready to use' : project.status === 'error' ? 'Needs attention' : 'Not prepared yet'}
-          </span>
+          </Badge>
           {isReady && (
             <>
-              <Link to={`/cases?project=${id}`} className="btn-secondary text-sm">
-                Open cases
+              <Link
+                to={`/cases?project=${id}`}
+                className="btn-secondary text-xs inline-flex items-center gap-1.5"
+              >
+                <Briefcase size={13} />
+                <span>Open cases</span>
               </Link>
-              <Link to={`/whatif/${id}`} className="btn-ghost text-sm">
-                What-if
+              <Link
+                to={`/whatif/${id}`}
+                className="btn-ghost text-xs inline-flex items-center gap-1.5"
+              >
+                <Sliders size={13} />
+                <span>What-if</span>
               </Link>
             </>
           )}
@@ -630,6 +644,41 @@ export default function ProjectDetail() {
       {deleteError && (
         <div className="mb-4 text-sm border border-coral/40 bg-coral-soft px-4 py-3 rounded-control">{deleteError}</div>
       )}
+
+      {/* Business Decision Lifecycle Status */}
+      <div className="mb-8 p-4 bg-paper/60 border border-mist rounded-control">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="h-6 w-6 rounded-full bg-teal/20 text-teal flex items-center justify-center font-bold text-xs shrink-0">✓</span>
+            <div>
+              <span className="font-semibold text-ink block">1. Objective Configured</span>
+              <span className="text-[11px] text-[var(--muted)]">Target: {outcomeLabel}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span className={`h-6 w-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+              isReady ? 'bg-teal/20 text-teal' : 'bg-coral-soft text-coral border border-coral/30'
+            }`}>
+              {isReady ? '✓' : '2'}
+            </span>
+            <div>
+              <span className="font-semibold text-ink block">2. Model Evaluation</span>
+              <span className="text-[11px] text-[var(--muted)]">{isReady ? (readiness?.label || 'Trained & evaluated') : 'Requires preparation'}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span className={`h-6 w-6 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+              isReady ? 'bg-teal/20 text-teal' : 'bg-mist text-[var(--muted)]'
+            }`}>
+              {isReady ? '✓' : '3'}
+            </span>
+            <div>
+              <span className="font-semibold text-ink block">3. Decision Ledger & Action</span>
+              <span className="text-[11px] text-[var(--muted)]">{isReady ? 'Active case reviews' : 'Pending model activation'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {(project.status === 'created' || project.status === 'draft') && (
         <section className="surface p-6 mb-8">
